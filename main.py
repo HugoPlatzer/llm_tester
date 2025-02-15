@@ -24,6 +24,10 @@ def validate_path(path: str, error_prefix: str) -> Path:
         raise FileNotFoundError(f"{error_prefix} not found at: {path}")
     return path_obj
 
+def clean_ansi_escape_sequences(text):
+    ansi_escape = re.compile(r'\x1B\[[0-?]*[ -/]*[@-~]')
+    return ansi_escape.sub('', text)
+
 def download_file(url: str, dest: Path) -> Tuple[bool, str]:
     global total_bytes_downloaded
     try:
@@ -106,7 +110,14 @@ def run_llm_inference(llama_run_path: Path, model_file: Path, prompt: str, conte
         capture_output=True,
         text=True
     )
-    return process.stdout.strip() if process.returncode == 0 else ""
+    if process.returncode == 0:
+        output = process.stdout
+        output = clean_ansi_escape_sequences(output)
+        output = output.strip()
+        return output
+    else:
+        raise Exception("llama-run did not exit with 0")
+
 def process_model(
     model_config: dict,
     prompts: List[dict],
