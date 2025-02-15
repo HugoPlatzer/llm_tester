@@ -8,10 +8,11 @@ import threading
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from tempfile import TemporaryDirectory
-from typing import List, Tuple
+from typing import List, Tuple, Optional
 
 import requests
 from tqdm import tqdm
+
 
 # Global variables for download tracking
 total_bytes_downloaded = 0
@@ -106,46 +107,47 @@ def run_llm_inference(llama_run_path: Path, model_file: Path, prompt: str, conte
         text=True
     )
     return process.stdout.strip() if process.returncode == 0 else ""
-
 def process_model(
     model_config: dict,
     prompts: List[dict],
     llama_run_path: Path,
     output_path: Path,
     context_len: int,
-    verbose: bool
+    verbose: bool,
+    local_model_path: Optional[Path] = None  # New parameter
 ):
-    with TemporaryDirectory() as temp_dir:
-        temp_dir = Path(temp_dir)
-        try:
-            main_file, downloaded_urls = download_model(
-                model_config["url"], temp_dir
-            )
-        except Exception as e:
-            print(f"\nFailed to download model {model_config['name']}: {str(e)}")
-            return
-        
-        model_name = model_config['name']
-        
-        with tqdm(prompts, desc=f"Processing {model_name}", leave=False) as pbar:
-            for prompt in pbar:
-                result_entry = {
-                    "model_name": model_name,
-                    "prompt_name": prompt["name"],
-                    "prompt": prompt["prompt"],
-                    "response": run_llm_inference(
-                        llama_run_path, main_file, prompt["prompt"], context_len
-                    )
-                }
-                
-                with open(output_path, 'a') as f:
-                    f.write(json.dumps(result_entry) + "\n")
-                
-                if verbose:
-                    tqdm.write(
-                        f"Processed {model_name} - {prompt['name']}: "
-                        f"{result_entry['response'][:50]}..."
-                    )
+    model_name = model_config['name']
+    
+    if local_model_path:
+        # Directly use provided local model
+        main_file = local_model_path
+    else:
+        # Original download logic
+        with TemporaryDirectory() as temp_dir:
+            temp_dir = Path(temp_dir)
+            try:
+                main_file, _ = download_model(model_config["url"], temp_dir)
+            except Exception as e:
+                print(f"\nFailed to download model {model_name}: {str(e)}")
+                return
+
+    # Common processing logic
+    with tqdm(prompts, desc=f"Processing {model_name}", leave=False) as pbar:
+        for prompt in pbar:
+            result_entry = {
+                "model_name": model_name,
+                "prompt_name": prompt["name"],
+                "prompt": prompt["prompt"],
+                "response": run_llm_inference(
+                    llama_run_path, main_file, prompt["prompt"], context_len
+                )
+            }
+            
+            with open(output_path, 'a') as f:
+                f.write(json.dumps(result_entry) + "\n")
+            
+            if verbose:
+                tqdm.write(f"Processed {model_name} - {prompt['name']}: {result_entry['response'][:50]}...")
 
 def main():
     parser = argparse.ArgumentParser(description='LLM Benchmarking Tool')
@@ -153,6 +155,7 @@ def main():
     parser.add_argument('--llama_run_path', required=True, help='Path to llama-run')
     parser.add_argument('--output', required=True, help='Output JSONL file path')
     parser.add_argument('--verbose', action='store_true', help='Verbose output')
+    parser.add_argument('--local-model', help='Path to local model file (bypasses downloads)')  # Modified
     
     args = parser.parse_args()
 
@@ -169,18 +172,30 @@ def main():
     
     # Prepare output
     output_path.parent.mkdir(parents=True, exist_ok=True)
-    with open(output_path, 'w'): pass  # Truncate file
-    
-    # Process models
-    for model_config in tqdm(config["models"], desc="Models"):
+    with open(output_path, 'w'): pass
+
+    if args.local_model:  # Local model mode
+        local_model_path = validate_path(args.local_model, "Local model file")
+        model_name = local_model_path.stem  # Use filename as model name
         process_model(
-            model_config=model_config,
+            model_config={"name": model_name, "url": ""},  # Dummy config
             prompts=config["prompts"],
             llama_run_path=llama_run_path,
             output_path=output_path,
             context_len=settings["context_len"],
-            verbose=args.verbose
+            verbose=args.verbose,
+            local_model_path=local_model_path
         )
+    else:  # Normal mode
+        for model_config in tqdm(config["models"], desc="Models"):
+            process_model(
+                model_config=model_config,
+                prompts=config["prompts"],
+                llama_run_path=llama_run_path,
+                output_path=output_path,
+                context_len=settings["context_len"],
+                verbose=args.verbose
+            )
 
 if __name__ == "__main__":
     main()
