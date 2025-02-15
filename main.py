@@ -45,22 +45,22 @@ def download_file(url: str, dest: Path) -> Tuple[bool, str]:
     except Exception as e:
         return False, str(e)
 
-def print_download_progress(stop_event: threading.Event):
+def print_download_progress(stop_event: threading.Event, model_name: str):
     while not stop_event.is_set():
         with download_lock:
             gb = total_bytes_downloaded / (1024**3)
-        sys.stdout.write(f"\rDownloaded: {gb:.3f} GB")
+        sys.stdout.write(f"\rDownloading {model_name}: {gb:.3f}GB")
         sys.stdout.flush()
         time.sleep(2)
     print()  # New line after download completes
 
-def download_model(model_url: str, temp_dir: Path) -> Tuple[Path, List[str]]:
+def download_model(model_url: str, temp_dir: Path, model_name: str) -> Tuple[Path, List[str]]:
     global total_bytes_downloaded
     total_bytes_downloaded = 0  # Reset counter for each new model
     
     # Start progress thread
     stop_event = threading.Event()
-    progress_thread = threading.Thread(target=print_download_progress, args=(stop_event,))
+    progress_thread = threading.Thread(target=print_download_progress, args=(stop_event, model_name))
     progress_thread.start()
 
     try:
@@ -131,8 +131,9 @@ def process_model(
     
     if local_model_path:
         main_file = local_model_path
-        with tqdm(prompts, desc=f"Processing {model_name}", leave=False) as pbar:
+        with tqdm(prompts, desc=f"Processing {model_name}", leave=True) as pbar:
             for prompt in pbar:
+                pbar.set_description(f"Model: {model_name} | Prompt: {prompt['name']}")
                 response = run_llm_inference(
                     llama_run_path, main_file, prompt["prompt"], context_len
                 )
@@ -145,17 +146,19 @@ def process_model(
                 results.append(result_entry)
                 if verbose:
                     tqdm.write(f"Processed {model_name} - {prompt['name']}: {response[:50]}...")
+        print()  # New line after processing all prompts
     else:
         with TemporaryDirectory() as temp_dir:
             temp_dir = Path(temp_dir)
             try:
-                main_file, _ = download_model(model_config["url"], temp_dir)
+                main_file, _ = download_model(model_config["url"], temp_dir, model_name)
             except Exception as e:
                 print(f"\nFailed to download model {model_name}: {str(e)}")
                 return []
             
-            with tqdm(prompts, desc=f"Processing {model_name}", leave=False) as pbar:
+            with tqdm(prompts, desc=f"Processing {model_name}", leave=True) as pbar:
                 for prompt in pbar:
+                    pbar.set_description(f"Model: {model_name} | Prompt: {prompt['name']}")
                     response = run_llm_inference(
                         llama_run_path, main_file, prompt["prompt"], context_len
                     )
@@ -168,6 +171,7 @@ def process_model(
                     results.append(result_entry)
                     if verbose:
                         tqdm.write(f"Processed {model_name} - {prompt['name']}: {response[:50]}...")
+            print()  # New line after processing all prompts
     
     return results
 
@@ -210,7 +214,7 @@ def main():
         )
         all_results.extend(model_results)
     else:
-        for model_config in tqdm(config["models"], desc="Models"):
+        for model_config in config["models"]:
             model_results = process_model(
                 model_config=model_config,
                 prompts=config["prompts"],
