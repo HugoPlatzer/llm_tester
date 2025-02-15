@@ -152,7 +152,7 @@ def process_model(
 def main():
     parser = argparse.ArgumentParser(description='LLM Benchmarking Tool')
     parser.add_argument('--config', required=True, help='Configuration file path')
-    parser.add_argument('--llama_run_path', required=True, help='Path to llama-run')
+    parser.add_argument('--llama-run-path', required=True, help='Path to llama-run')
     parser.add_argument('--output', required=True, help='Output JSONL file path')
     parser.add_argument('--verbose', action='store_true', help='Verbose output')
     parser.add_argument('--local-model', help='Path to local model file (bypasses downloads)')  # Modified
