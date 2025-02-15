@@ -1,4 +1,7 @@
 {
+    "settings": {
+        "context_len": 2048
+    },
     "models": [
         {
             "name": "qwen2-0.5",

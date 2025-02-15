@@ -99,9 +99,9 @@ def download_model(model_url: str, temp_dir: Path) -> Tuple[Path, List[str]]:
         stop_event.set()
         progress_thread.join()
 
-def run_llm_inference(llama_run_path: Path, model_file: Path, prompt: str) -> str:
+def run_llm_inference(llama_run_path: Path, model_file: Path, prompt: str, context_len: str) -> str:
     process = subprocess.run(
-        [str(llama_run_path), str(model_file), prompt],
+        [str(llama_run_path), "-c", str(context_len), str(model_file), prompt],
         capture_output=True,
         text=True
     )
@@ -112,6 +112,7 @@ def process_model(
     prompts: List[dict],
     llama_run_path: Path,
     output_path: Path,
+    context_len: int,
     verbose: bool
 ):
     with TemporaryDirectory() as temp_dir:
@@ -133,7 +134,7 @@ def process_model(
                     "prompt_name": prompt["name"],
                     "prompt": prompt["prompt"],
                     "response": run_llm_inference(
-                        llama_run_path, main_file, prompt["prompt"]
+                        llama_run_path, main_file, prompt["prompt"], context_len
                     )
                 }
                 
@@ -164,6 +165,8 @@ def main():
     with open(config_path) as f:
         config = json.load(f)
     
+    settings = config["settings"]
+    
     # Prepare output
     output_path.parent.mkdir(parents=True, exist_ok=True)
     with open(output_path, 'w'): pass  # Truncate file
@@ -175,6 +178,7 @@ def main():
             prompts=config["prompts"],
             llama_run_path=llama_run_path,
             output_path=output_path,
+            context_len=settings["context_len"],
             verbose=args.verbose
         )
 
