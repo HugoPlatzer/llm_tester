@@ -1,0 +1,10 @@
+[
+    {
+        "name": "1",
+        "prompt": "What is 2+3?"
+    },
+    {
+        "name": "2",
+        "prompt": "How many r's in the word \"strawberry\"?"
+    }
+]
