@@ -4,8 +4,12 @@
     },
     "models": [
         {
-            "name": "qwen2-0.5",
+            "name": "qwen2-0.5b",
             "url": "https://huggingface.co/bartowski/Qwen2.5-0.5B-Instruct-GGUF/resolve/main/Qwen2.5-0.5B-Instruct-IQ3_M.gguf"
+        },
+        {
+            "name": "llama3-1b",
+            "url": "https://huggingface.co/bartowski/Llama-3.2-1B-Instruct-GGUF/resolve/main/Llama-3.2-1B-Instruct-IQ3_M.gguf"
         }
     ],
     "prompts": [
@@ -14,8 +18,16 @@
             "prompt": "What is 2+3?"
         },
         {
+            "name": "math_2",
+            "prompt": "What is 23*89?"
+        },
+        {
             "name": "word_1",
             "prompt": "How many letters in 'apple'?"
+        },
+        {
+            "name": "word_2",
+            "prompt": "How many r's in 'strawberry'?"
         }
     ]
 }
