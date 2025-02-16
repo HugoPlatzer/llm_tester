@@ -8,7 +8,7 @@ import threading
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from tempfile import TemporaryDirectory
-from typing import List, Tuple, Optional, Dict, Any
+from typing import List, Tuple, Optional, Dict, Any, Generator
 
 import requests
 from tqdm import tqdm
@@ -125,9 +125,8 @@ def process_model(
     context_len: int,
     verbose: bool,
     local_model_path: Optional[Path] = None
-) -> List[Dict[str, Any]]:
+) -> Generator[Dict[str, Any], None, None]:
     model_name = model_config['name']
-    results = []
     
     if local_model_path:
         main_file = local_model_path
@@ -143,7 +142,7 @@ def process_model(
                     "prompt": prompt["prompt"],
                     "response": response
                 }
-                results.append(result_entry)
+                yield result_entry
                 if verbose:
                     tqdm.write(f"Processed {model_name} - {prompt['name']}: {response[:50]}...")
         print()  # New line after processing all prompts
@@ -154,7 +153,7 @@ def process_model(
                 main_file, _ = download_model(model_config["url"], temp_dir, model_name)
             except Exception as e:
                 print(f"\nFailed to download model {model_name}: {str(e)}")
-                return []
+                return
             
             with tqdm(prompts, desc=f"Processing {model_name}", leave=True) as pbar:
                 for prompt in pbar:
@@ -168,12 +167,10 @@ def process_model(
                         "prompt": prompt["prompt"],
                         "response": response
                     }
-                    results.append(result_entry)
+                    yield result_entry
                     if verbose:
                         tqdm.write(f"Processed {model_name} - {prompt['name']}: {response[:50]}...")
             print()  # New line after processing all prompts
-    
-    return results
 
 def main():
     parser = argparse.ArgumentParser(description='LLM Benchmarking Tool')
@@ -199,36 +196,67 @@ def main():
     # Prepare output directory
     output_path.parent.mkdir(parents=True, exist_ok=True)
     
-    all_results = []
+    # Load existing results or initialize
+    if output_path.exists():
+        try:
+            with open(output_path, 'r') as f:
+                all_results = json.load(f)
+        except json.JSONDecodeError:
+            all_results = []
+    else:
+        all_results = []
 
     if args.local_model:
         local_model_path = validate_path(args.local_model, "Local model file")
         model_name = local_model_path.stem
-        model_results = process_model(
+        # Filter unprocessed prompts
+        processed_prompts = {res['prompt_name'] for res in all_results if res['model_name'] == model_name}
+        unprocessed_prompts = [p for p in config["prompts"] if p['name'] not in processed_prompts]
+        
+        if not unprocessed_prompts:
+            print(f"All prompts for local model {model_name} are already processed.")
+            return
+        
+        model_generator = process_model(
             model_config={"name": model_name, "url": ""},
-            prompts=config["prompts"],
+            prompts=unprocessed_prompts,
             llama_run_path=llama_run_path,
             context_len=settings["context_len"],
             verbose=args.verbose,
             local_model_path=local_model_path
         )
-        all_results.extend(model_results)
+        
+        for result in model_generator:
+            all_results.append(result)
+            with open(output_path, 'w') as f:
+                json.dump(all_results, f, indent=4)
+                f.write('\n')
     else:
         for model_config in config["models"]:
-            model_results = process_model(
+            model_name = model_config['name']
+            # Filter unprocessed prompts
+            processed_prompts = {res['prompt_name'] for res in all_results if res['model_name'] == model_name}
+            unprocessed_prompts = [p for p in config["prompts"] if p['name'] not in processed_prompts]
+            
+            if not unprocessed_prompts:
+                print(f"Skipping model {model_name} (all prompts processed)")
+                continue
+            
+            model_generator = process_model(
                 model_config=model_config,
-                prompts=config["prompts"],
+                prompts=unprocessed_prompts,
                 llama_run_path=llama_run_path,
                 context_len=settings["context_len"],
                 verbose=args.verbose,
                 local_model_path=None
             )
-            all_results.extend(model_results)
-    
-    # Write formatted JSON output
-    with open(output_path, 'w') as f:
-        json.dump(all_results, f, indent=4)
-        f.write('\n')
+            
+            for result in model_generator:
+                all_results.append(result)
+                with open(output_path, 'w') as f:
+                    json.dump(all_results, f, indent=4)
+                    f.write('\n')
 
 if __name__ == "__main__":
     main()
+
