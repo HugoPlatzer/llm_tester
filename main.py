@@ -140,11 +140,17 @@ def run_inference(
     llama_run_path: Path,
     model_file: Path,
     prompt: str,
-    context_len: int
+    context_len: int,
+    use_cuda: bool
 ) -> str:
     """Runs the LLM inference and returns cleaned output."""
+    command = [str(llama_run_path), "-c", str(context_len)]
+    if use_cuda:
+        command.extend(["-ngl", "1000"])
+    command.extend([str(model_file), prompt])
+    
     process = subprocess.run(
-        [str(llama_run_path), "-c", str(context_len), str(model_file), prompt],
+        command,
         capture_output=True,
         text=True
     )
@@ -187,7 +193,8 @@ def process_prompts(
     prompts: List[Dict[str, str]],
     llama_run_path: Path,
     context_len: int,
-    verbose: bool
+    verbose: bool,
+    use_cuda: bool
 ) -> Generator[Dict[str, Any], None, None]:
     """Processes all prompts through the model and yields results."""
     with tqdm(prompts, desc=f"Processing {model_name}", leave=True) as pbar:
@@ -197,7 +204,8 @@ def process_prompts(
                 llama_run_path,
                 model_file,
                 prompt["prompt"],
-                context_len
+                context_len,
+                use_cuda
             )
             result = {
                 "model_name": model_name,
@@ -237,6 +245,7 @@ def main() -> None:
     parser.add_argument('--llama-run-path', required=True, help='Path to llama-run')
     parser.add_argument('--output', required=True, help='Output JSON file path')
     parser.add_argument('--verbose', action='store_true', help='Verbose output')
+    parser.add_argument('--cuda', action='store_true', help='Enable CUDA offload with -ngl 1000')
     parser.add_argument('--local-model', help='Path to local model file')
     args = parser.parse_args()
 
@@ -293,7 +302,8 @@ def main() -> None:
                     unprocessed,
                     llama_run_path,
                     settings["context_len"],
-                    args.verbose
+                    args.verbose,
+                    args.cuda
                 ):
                     all_results.append(result)
                     write_results(output_path, all_results)
