@@ -189,7 +189,6 @@ def download_model(
         total_parts = int(match.group(2))
         base_url = re.sub(r"-\d{5}-of-\d{5}\.gguf$", "", model_url)
         
-        # Create a task queue with retry tracking
         part_queue = queue.Queue()
         for i in range(1, total_parts + 1):
             part_queue.put(i)
@@ -224,12 +223,10 @@ def download_model(
                 finally:
                     part_queue.task_done()
 
-        # Use bounded thread pool
         with ThreadPoolExecutor(max_workers=max_workers) as executor:
             for _ in range(max_workers):
                 executor.submit(worker)
             
-            # Monitor progress
             while not part_queue.empty() and not failed:
                 time.sleep(1)
                 remaining = part_queue.qsize()
@@ -239,7 +236,27 @@ def download_model(
         if failed:
             raise RuntimeError("Aborted due to download failure")
 
-        return results[0][0], [url for _, url in results]
+        # Extract part numbers and sort files correctly
+        def get_part_number(path: Path) -> int:
+            match = re.search(r"-(\d{5})-of-\d{5}\.gguf$", path.name)
+            if not match:
+                raise ValueError(f"Invalid part filename: {path.name}")
+            return int(match.group(1))
+        
+        # Sort parts numerically and verify completeness
+        downloaded_files = [dest for dest, _ in results]
+        downloaded_files.sort(key=get_part_number)
+        
+        expected_parts = set(range(1, total_parts + 1))
+        actual_parts = {get_part_number(f) for f in downloaded_files}
+        
+        if expected_parts != actual_parts:
+            missing = expected_parts - actual_parts
+            raise RuntimeError(f"Missing model parts: {missing}")
+
+        # Return first part's path for inference
+        main_file = downloaded_files[0]
+        return main_file, [url for _, url in results]
 
 
 def run_inference(
