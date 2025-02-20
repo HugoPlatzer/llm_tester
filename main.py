@@ -261,7 +261,15 @@ def run_inference(
         text=True
     )
     if process.returncode != 0:
-        raise RuntimeError("llama-run execution failed")
+        # Clean and capture debug information
+        stderr_clean = clean_ansi_escape_sequences(process.stderr).strip()
+        stdout_clean = clean_ansi_escape_sequences(process.stdout).strip()
+        error_msg = (
+            f"llama-run execution failed (exit code {process.returncode})\n"
+            f"STDERR OUTPUT:\n{stderr_clean}\n"
+            f"STDOUT OUTPUT:\n{stdout_clean}"
+        )
+        raise RuntimeError(error_msg)
     
     output = clean_ansi_escape_sequences(process.stdout).strip()
     return output
