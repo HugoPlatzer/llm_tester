@@ -1,5 +1,12 @@
 {
     "settings": {
+         "download": {
+              "max_retries": 5,
+              "retry_delay": 5,
+              "timeout": [30, 60],
+              "max_workers": 4,
+              "chunk_size": 65536
+        },
         "context_len": 2048
     },
     "models": [

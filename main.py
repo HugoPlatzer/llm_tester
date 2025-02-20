@@ -5,12 +5,15 @@ import subprocess
 import sys
 import time
 import threading
+import queue
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import contextmanager
 from pathlib import Path
 from tempfile import TemporaryDirectory
-from typing import List, Tuple, Optional, Dict, Any, Generator, Callable, Set
+from typing import List, Tuple, Optional, Dict, Any, Generator, Callable
 import requests
+from requests.adapters import HTTPAdapter
+from urllib3.util.retry import Retry
 from tqdm import tqdm
 
 
@@ -62,22 +65,62 @@ def clean_ansi_escape_sequences(text: str) -> str:
 def download_file(
     url: str,
     dest: Path,
-    on_chunk: Optional[Callable[[int], None]] = None
+    on_chunk: Optional[Callable[[int], None]] = None,
+    max_retries: int = 3,
+    retry_delay: int = 5,
+    timeout: Tuple[int, int] = (30, 60),
+    chunk_size: int = 65536
 ) -> Tuple[bool, str]:
-    """Downloads a file with optional progress tracking."""
-    try:
-        response = requests.get(url, stream=True)
-        response.raise_for_status()
-        
-        with open(dest, 'wb') as f:
-            for chunk in response.iter_content(chunk_size=8192):
-                if chunk:
-                    f.write(chunk)
-                    if on_chunk:
-                        on_chunk(len(chunk))
-        return True, ""
-    except Exception as e:
-        return False, str(e)
+    """Downloads a file with retries, exponential backoff, and progress tracking."""
+    session = requests.Session()
+    
+    # Configure retry strategy
+    retry_strategy = Retry(
+        total=max_retries,
+        backoff_factor=retry_delay,
+        status_forcelist=[429, 500, 502, 503, 504],
+        allowed_methods=["HEAD", "GET", "OPTIONS"]
+    )
+    adapter = HTTPAdapter(max_retries=retry_strategy)
+    session.mount("https://", adapter)
+    session.mount("http://", adapter)
+
+    for attempt in range(max_retries + 1):
+        try:
+            response = session.get(url, stream=True, timeout=timeout)
+            response.raise_for_status()
+            
+            # Track content length for validation
+            content_length = int(response.headers.get('Content-Length', 0))
+            downloaded = 0
+            
+            with open(dest, 'wb') as f:
+                for chunk in response.iter_content(chunk_size=chunk_size):
+                    if chunk:
+                        f.write(chunk)
+                        downloaded += len(chunk)
+                        if on_chunk:
+                            on_chunk(len(chunk))
+            
+            # Validate download size if Content-Length was provided
+            if content_length > 0 and downloaded != content_length:
+                raise requests.exceptions.ContentDecodingError(
+                    f"Incomplete download (expected {content_length}, got {downloaded})"
+                )
+                
+            return True, ""
+            
+        except requests.exceptions.RequestException as e:
+            if attempt < max_retries:
+                current_delay = retry_delay * (2 ** attempt)
+                print(f"Retry {attempt+1}/{max_retries} for {url} after error: {str(e)[:100]}...")
+                time.sleep(current_delay)
+            else:
+                return False, f"Failed after {max_retries+1} attempts: {str(e)}"
+        finally:
+            session.close()
+    
+    return False, "Max retries exceeded"
 
 
 def download_model_part(
@@ -85,55 +128,118 @@ def download_model_part(
     part_number: int,
     total_parts: int,
     dest_dir: Path,
-    on_chunk: Callable[[int], None]
+    on_chunk: Callable[[int], None],
+    max_retries: int,
+    retry_delay: int,
+    timeout: Tuple[int, int],
+    chunk_size: int
 ) -> Tuple[Path, str]:
-    """Downloads a single part of a multi-part model."""
+    """Downloads a single part of a multi-part model with enhanced robustness."""
     url = f"{base_url}-{part_number:05d}-of-{total_parts:05d}.gguf"
     dest = dest_dir / Path(url).name
-    success, error = download_file(url, dest, on_chunk)
+    
+    # Check for existing partial download
+    if dest.exists():
+        dest.unlink()
+    
+    success, error = download_file(
+        url,
+        dest,
+        on_chunk,
+        max_retries=max_retries,
+        retry_delay=retry_delay,
+        timeout=timeout,
+        chunk_size=chunk_size
+    )
+    
     if not success:
         raise RuntimeError(f"Failed to download {url}: {error}")
+    
     return dest, url
 
 
 def download_model(
     model_url: str,
     dest_dir: Path,
-    model_name: str
+    model_name: str,
+    max_retries: int = 3,
+    retry_delay: int = 5,
+    timeout: Tuple[int, int] = (30, 60),
+    max_workers: int = 4,
+    chunk_size: int = 65536
 ) -> Tuple[Path, List[str]]:
-    """Handles both single-file and multi-part model downloads."""
+    """Handles model downloads with improved parallelization and error handling."""
     with DownloadProgressTracker(model_name) as tracker:
         match = re.search(r"-(\d{5})-of-(\d{5})\.gguf$", model_url)
         if not match:
             dest = dest_dir / Path(model_url).name
-            success, error = download_file(model_url, dest, tracker.update)
+            success, error = download_file(
+                model_url,
+                dest,
+                tracker.update,
+                max_retries=max_retries,
+                retry_delay=retry_delay,
+                timeout=timeout,
+                chunk_size=chunk_size
+            )
             if not success:
                 raise RuntimeError(f"Download failed: {error}")
             return dest, [model_url]
 
         total_parts = int(match.group(2))
         base_url = re.sub(r"-\d{5}-of-\d{5}\.gguf$", "", model_url)
-        urls = [f"{base_url}-{i:05d}-of-{total_parts:05d}.gguf" 
-                for i in range(1, total_parts + 1)]
+        
+        # Create a task queue with retry tracking
+        part_queue = queue.Queue()
+        for i in range(1, total_parts + 1):
+            part_queue.put(i)
 
-        with ThreadPoolExecutor() as executor:
-            futures = [
-                executor.submit(
-                    download_model_part,
-                    base_url,
-                    i,
-                    total_parts,
-                    dest_dir,
-                    tracker.update
-                )
-                for i in range(1, total_parts + 1)
-            ]
+        results = []
+        failed = False
+        lock = threading.Lock()
+
+        def worker():
+            nonlocal failed
+            while not part_queue.empty() and not failed:
+                try:
+                    part_num = part_queue.get_nowait()
+                    dest, url = download_model_part(
+                        base_url,
+                        part_num,
+                        total_parts,
+                        dest_dir,
+                        tracker.update,
+                        max_retries,
+                        retry_delay,
+                        timeout,
+                        chunk_size
+                    )
+                    with lock:
+                        results.append((dest, url))
+                except Exception as e:
+                    with lock:
+                        failed = True
+                    print(f"\nCritical error in part {part_num}: {str(e)}")
+                    part_queue.queue.clear()
+                finally:
+                    part_queue.task_done()
+
+        # Use bounded thread pool
+        with ThreadPoolExecutor(max_workers=max_workers) as executor:
+            for _ in range(max_workers):
+                executor.submit(worker)
             
-            results = []
-            for future in futures:
-                results.append(future.result())
+            # Monitor progress
+            while not part_queue.empty() and not failed:
+                time.sleep(1)
+                remaining = part_queue.qsize()
+                sys.stdout.write(f"\rParts remaining: {remaining}/{total_parts}")
+                sys.stdout.flush()
 
-        return results[0][0], urls
+        if failed:
+            raise RuntimeError("Aborted due to download failure")
+
+        return results[0][0], [url for _, url in results]
 
 
 def run_inference(
@@ -164,9 +270,10 @@ def run_inference(
 @contextmanager
 def get_model_file(
     model_config: Dict[str, Any],
-    local_model_path: Optional[Path]
+    local_model_path: Optional[Path],
+    download_settings: Dict[str, Any]
 ) -> Generator[Tuple[Path, str], None, None]:
-    """Context manager for model file acquisition (local or download)."""
+    """Context manager for model file acquisition with download settings."""
     model_name = model_config['name']
     
     if local_model_path:
@@ -179,7 +286,8 @@ def get_model_file(
             main_file, _ = download_model(
                 model_config["url"],
                 dest_dir,
-                model_name
+                model_name,
+                **download_settings
             )
             yield main_file, model_name
         except Exception as e:
@@ -258,7 +366,17 @@ def main() -> None:
     # Load configuration
     with open(config_path) as f:
         config = json.load(f)
-    settings = config["settings"]
+    
+    # Get download settings with defaults
+    download_settings = config["settings"].get("download", {})
+    download_settings.setdefault("max_retries", 3)
+    download_settings.setdefault("retry_delay", 5)
+    download_settings.setdefault("timeout", (30, 60))
+    download_settings.setdefault("max_workers", 4)
+    download_settings.setdefault("chunk_size", 65536)
+
+    # ensure timeout setting is a tuple
+    download_settings["timeout"] = tuple(download_settings["timeout"])
 
     # Initialize or load results
     try:
@@ -294,14 +412,15 @@ def main() -> None:
         try:
             with get_model_file(
                 model_config,
-                local_model_path=Path(args.local_model) if args.local_model else None
+                local_model_path=Path(args.local_model) if args.local_model else None,
+                download_settings=download_settings
             ) as (model_file, _):
                 for result in process_prompts(
                     model_file,
                     model_name,
                     unprocessed,
                     llama_run_path,
-                    settings["context_len"],
+                    config["settings"]["context_len"],
                     args.verbose,
                     args.cuda
                 ):
