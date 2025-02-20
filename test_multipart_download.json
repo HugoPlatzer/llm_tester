@@ -1,0 +1,17 @@
+{
+    "settings": {
+        "context_len": 8192
+    },
+    "models": [
+        {
+            "name": "llama-3.3-70b",
+            "url": "https://huggingface.co/bartowski/Llama-3.3-70B-Instruct-GGUF/resolve/main/Llama-3.3-70B-Instruct-Q5_K_M/Llama-3.3-70B-Instruct-Q5_K_M-00001-of-00002.gguf"
+        }
+    ],
+    "prompts": [
+        {
+            "name": "word_01",
+            "prompt": "How many r's in \"strawberry\"?"
+        }
+    ]
+}
