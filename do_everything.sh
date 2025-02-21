@@ -33,6 +33,10 @@ SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
 echo "Installing Python dependencies..."
 python3 -m pip install -r "$SCRIPT_DIR/requirements.txt"
 
+# Install aria2
+echo "Installing aria2..."
+apt install aria2
+
 # Build llama.cpp
 echo "Building llama.cpp..."
 if [ -d "llama.cpp" ]; then
