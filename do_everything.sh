@@ -46,6 +46,7 @@ fi
 
 git clone https://github.com/ggerganov/llama.cpp
 cd llama.cpp
+git checkout fc1b0d0936e4dfc52a81f38e7420c7d23f6caa88
 
 # Add CUDA option if flag is set
 if [ $USE_CUDA -eq 1 ]; then
@@ -63,7 +64,7 @@ RESULTS_JSON="${CONFIG_BASENAME}_results.json"
 
 # Run main script with optional CUDA flag
 PYTHON_ARGS=(
-    --llama-run-path "llama.cpp/build/bin/llama-run"
+    --llama-run-cmd "llama.cpp/build/bin/llama-run"
     --config "$CONFIG_FILE"
     --output "$RESULTS_JSON"
 )
