@@ -35,7 +35,7 @@ python3 -m pip install -r "$SCRIPT_DIR/requirements.txt"
 
 # Install aria2
 echo "Installing aria2..."
-apt install aria2
+apt install -y aria2
 
 # Build llama.cpp
 echo "Building llama.cpp..."
@@ -73,6 +73,6 @@ if [ $USE_CUDA -eq 1 ]; then
 fi
 
 echo "Starting model processing..."
-python3 "$SCRIPT_DIR/main.py" "${PYTHON_ARGS[@]}"
+python3 "$SCRIPT_DIR/main2.py" "${PYTHON_ARGS[@]}"
 
 echo "Processing complete! Results saved to: $RESULTS_JSON"
