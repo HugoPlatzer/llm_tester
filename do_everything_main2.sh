@@ -33,6 +33,10 @@ SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
 echo "Installing Python dependencies..."
 python3 -m pip install -r "$SCRIPT_DIR/requirements.txt"
 
+# Install aria2
+echo "Installing aria2..."
+apt install -y aria2
+
 # Build llama.cpp
 echo "Building llama.cpp..."
 if [ -d "llama.cpp" ]; then
@@ -60,9 +64,9 @@ RESULTS_JSON="${CONFIG_BASENAME}_results.json"
 
 # Run main script with optional CUDA flag
 PYTHON_ARGS=(
-    --llama-run-path "llama.cpp/build/bin/llama-run"
+    --llama-run-cmd "llama.cpp/build/bin/llama-run"
     --config "$CONFIG_FILE"
-    --output "$RESULTS_JSON"
+    --results "$RESULTS_JSON"
 )
 
 if [ $USE_CUDA -eq 1 ]; then
@@ -70,6 +74,6 @@ if [ $USE_CUDA -eq 1 ]; then
 fi
 
 echo "Starting model processing..."
-python3 "$SCRIPT_DIR/main.py" "${PYTHON_ARGS[@]}"
+python3 "$SCRIPT_DIR/main2.py" "${PYTHON_ARGS[@]}"
 
 echo "Processing complete! Results saved to: $RESULTS_JSON"
