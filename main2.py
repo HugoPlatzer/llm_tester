@@ -6,7 +6,6 @@ import os
 import re
 
 
-
 def get_directory_name(url):
     basename = os.path.basename(url)
     assert basename.endswith(".gguf")
@@ -32,12 +31,19 @@ def get_urls_of_parts(url):
 
 
 def download_model(url):
+    aria2_cmd = "aria2c"
+    num_parallel_connections = 3
+
     model_dir = get_directory_name(url)
     remove_downloaded_model(url)
     os.mkdir(model_dir)
     urls = get_urls_of_parts(url)
     for url in urls:
-        cmd = ["aria2c", "-d", model_dir, "-o", get_filename(url), url]
+        cmd = [aria2_cmd,
+                "-x", str(num_parallel_connections),
+                "-d", model_dir,
+                "-o", get_filename(url),
+                url]
         subprocess.run(cmd, check=True)
     first_part_file = get_filename(urls[0])
     first_part_path = os.path.join(model_dir, first_part_file)
