@@ -65,14 +65,25 @@ def get_prompts_for_model(config, results_list, model_name):
     return missing_prompts
 
 
+def execute_llama_run(cmd):
+    try:
+        output = subprocess.check_output(cmd,
+            stderr=subprocess.PIPE)
+        output =  output.decode("utf-8").rstrip("\u001b[0m\n")
+    except subprocess.CalledProcessError as e:
+        output = (f"llama-run failed with returncode {e.returncode}"
+                f", stdout={e.stdout.decode('utf-8')}"
+                f", stderr={e.stderr.decode('utf-8')}")
+    return output
+
+
 def run_prompts_using_model(llama_run_cmd, store_result_fn,
         model_name, model_path, prompts, context_len):
     for prompt in prompts:
         prompt_name, prompt_str = prompt["name"], prompt["prompt"]
         print(model_name, prompt_name)
         cmd = [llama_run_cmd, "-c", str(context_len), model_path, prompt_str]
-        output = subprocess.check_output(cmd).decode("utf-8")
-        output = output.rstrip("\u001b[0m\n")
+        output = execute_llama_run(cmd)
         store_result_fn(model_name, prompt_name, prompt_str, output)
 
 
@@ -112,6 +123,7 @@ def main():
 
     if args.local_model:
         prompts = config["prompts"]
+        results_list = []
         run_prompts_using_model(args.llama_run_cmd, store_result_fn,
                 "local_model", args.local_model, prompts, context_len)
     else:
