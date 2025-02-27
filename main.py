@@ -140,7 +140,8 @@ def main():
                 continue
             model_path = download_model(model["url"])
             run_prompts_using_model(args.llama_run_cmd, store_result_fn,
-                    model["name"], model_path, prompts, context_len)
+                    model["name"], model_path, prompts, context_len,
+                    args.cuda)
             remove_downloaded_model(model["url"])
 
 
