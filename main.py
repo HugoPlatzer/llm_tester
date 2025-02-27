@@ -78,11 +78,15 @@ def execute_llama_run(cmd):
 
 
 def run_prompts_using_model(llama_run_cmd, store_result_fn,
-        model_name, model_path, prompts, context_len):
+        model_name, model_path, prompts, context_len, use_cuda):
     for prompt in prompts:
         prompt_name, prompt_str = prompt["name"], prompt["prompt"]
         print(model_name, prompt_name)
-        cmd = [llama_run_cmd, "-c", str(context_len), model_path, prompt_str]
+        cmd = [llama_run_cmd]
+        cmd.extend(["-c", str(context_len)])
+        if use_cuda:
+            cmd.extend(["-ngl", "1000"])
+        cmd.extend([model_path, prompt_str])
         output = execute_llama_run(cmd)
         store_result_fn(model_name, prompt_name, prompt_str, output)
 
@@ -107,6 +111,7 @@ def main():
     parser.add_argument("--config", type=str, required=True)
     parser.add_argument("--results", type=str, required=True)
     parser.add_argument("--local-model", type=str, required=False)
+    parser.add_argument("--cuda", action="store_true", required=False)
     args = parser.parse_args()
 
     config = json.loads(open(args.config, "r").read())
@@ -125,7 +130,8 @@ def main():
         prompts = config["prompts"]
         results_list = []
         run_prompts_using_model(args.llama_run_cmd, store_result_fn,
-                "local_model", args.local_model, prompts, context_len)
+                "local_model", args.local_model, prompts, context_len,
+                args.cuda)
     else:
         for model in config["models"]:
             prompts = get_prompts_for_model(config, results_list,
