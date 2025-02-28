@@ -67,9 +67,9 @@ def get_prompts_for_model(config, results_list, model_name):
 
 def execute_llama_run(cmd):
     try:
-        output = subprocess.check_output(cmd,
-            stderr=subprocess.PIPE)
-        output =  output.decode("utf-8").rstrip("\u001b[0m\n")
+        output = subprocess.check_output(cmd, stderr=subprocess.PIPE)
+        output = output.decode("utf-8", errors="replace")
+        output = output.rstrip("\u001b[0m\n")
     except subprocess.CalledProcessError as e:
         output = (f"llama-run failed with returncode {e.returncode}"
                 f", stdout={e.stdout.decode('utf-8')}"
